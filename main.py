@@ -6,6 +6,8 @@ import numpy as np
 import copy
 from perspective import four_point_transform
 from extract_information import dectect_letters
+import pytesseract
+from PIL import Image
 
 def getFilesNameInDir(name_dir) :
 
@@ -17,22 +19,22 @@ def getFilesNameInDir(name_dir) :
 
 def pre_processing (img) :
 
-    dst = img;
-    img_yuv = cv2.cvtColor(dst, cv2.COLOR_BGR2YUV)
-    cv2.imshow("yuv", dst)
-    img_yuv[:, :, 0] = cv2.equalizeHist(img_yuv[:, :, 0])
-    cv2.imshow("equal", img_yuv)
-    dst = cv2.cvtColor(img_yuv, cv2.COLOR_YUV2BGR)
-    cv2.imshow("BGR", dst)
-    dst = cv2.cvtColor(dst, 7)
+    dst = copy.deepcopy(img);
+
+    #dst = cv2.cvtColor(dst, 7)
+    dst = dst[:, :, 1]
+    #cv2.imshow("img", dst)
+    dst = cv2.equalizeHist(dst)
+    #cv2.imshow("hist", dst)
     #element = cv2.getStructuringElement(cv2.MORPH_RECT, (5, 5))
     #dst = cv2.morphologyEx(dst, cv2.MORPH_GRADIENT, element, borderType=cv2.BORDER_DEFAULT)
     dst = cv2.GaussianBlur(dst, (5, 5), 0)
     #dst = cv2.medianBlur(dst, 5)
+    #dst = cv2.adaptiveThreshold(dst,255,1,1,11,2)
     #dst = cv2.Canny(dst, 75, 200)
     dst = cv2.Laplacian(dst, -1, 3)
     #ret, dst = cv2.threshold(dst, 20, 255, 3)
-    cv2.imshow("edge", dst)
+    #cv2.imshow("edge", dst)
     return dst
 
 def draw_contours(img_src, img_edges) :
@@ -59,12 +61,29 @@ def draw_contours(img_src, img_edges) :
 def bound_information(img):
 
         bound_rects = dectect_letters(img)
+        box_information = []
         bounded_img = copy.deepcopy(img)
 
         for bound in bound_rects:
             x, y, w, h = bound
+            box_information.append(img[y-5:y+h, x-5:x+w])
             cv2.rectangle(bounded_img, (x - 5, y - 5), (x+w, y+h),(0, 255, 0), 2)
-        return bounded_img
+        return bounded_img, box_information
+
+def correction_string(str) :
+    #print len(str)
+    s = ''
+
+    if len(str) >= 20 : return s
+    for i in range(0, len(str)):
+        if str[len(str) - 1 - i] >= '0' and str[len(str) - 1 - i] <= '9' :
+            s += str[len(str) - 1 - i]
+        else : s = ''
+
+        if (len(s) == 9) : break
+
+    s = s[::-1]
+    return s;
 
 with open('config.json', 'r') as f:
     config = json.load(f)
@@ -78,6 +97,11 @@ for name_img in allFiles :
     i += 1
 
     img = cv2.imread(name_img)
+
+    #cv2.imshow("img_b", img[:, :, 0])
+    #cv2.imshow("img_g", img[:, :, 1])
+    #cv2.imshow("img_r", img[:, :, 2])
+
     img_src = copy.deepcopy(img)
     if img is None:
         print "Not open image."
@@ -90,15 +114,35 @@ for name_img in allFiles :
         print "Not found contour"
         continue
     pts = screenCnt.reshape(4, 2)
-    #warped_img = four_point_transform(img, pts)
-    #bounded_img = bound_information(warped_img)
+    warped_img = four_point_transform(img_src, pts)
+    bounded_img, boxes = bound_information(warped_img)
 
     #cv2.imshow("warped_img", warped_img)
-    #cv2.imshow("bounded_img", bounded_img)
+    cv2.imshow("bounded_img", bounded_img)
     #cv2.imshow("pre_processing", img_config)
-    cv2.imshow("src", img_src)
-    s = "/home/tuan/Desktop/IdentityCard/Result/{}.jpg".format(i)
-    #cv2.imwrite(s, bounded_img)
+    #cv2.imshow("src", img_src)
+
+    cmt = ''
+
+    for box in boxes:
+        if box.shape[0] <= 0 or box.shape[1] <= 0:
+            continue
+        box = box[:, :, 0]
+        #thres = cv2.threshold(box, 175, 255, 1)
+        cv2.imshow("bound infor", box)
+        #cv2.waitKey(1000)
+        img = Image.fromarray(box)
+        txt = pytesseract.image_to_string(img)
+        print txt
+        if txt == '':
+            continue
+        cmt = correction_string(txt)
+        if(len(cmt) == 9) :
+            break
+    print "So CMT : {}".format(cmt)
+
+    s = "/home/tuan/Desktop/IdentityCard/Result/{}.jpg".format(cmt)
+    cv2.imwrite(s, warped_img)
     cv2.waitKey(0)
 
 print "{} - {}".format(fail, i)
